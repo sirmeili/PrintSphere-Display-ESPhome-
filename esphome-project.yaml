@@ -1,11 +1,15 @@
+# Generic template – don't put personal values here. Flash from a small device file
+# that includes this one and overrides the substitutions (see example-device.yaml).
 substitutions:
-  homeassistant_url: #Enter your HA adress: http://homeassistant.local:8123 or https://homeassistant.local:8443
-  bambulab_printer: #Enter your printer entity name from homeassistant
-  bambulab_icon: #custom icon on page one: images/bambuicon.png
+  device_name: printsphere
+  friendly_name: PrintSphere-Display
+  homeassistant_url: http://homeassistant.local:8123
+  bambulab_printer: your_printer_id   # printer slug from HA, e.g. p1s_01p00a000000000
+  bambulab_icon: images/bambuicon-small.png
 
 esphome:
-  name: round-esp32
-  friendly_name: PrintSphere-Display
+  name: ${device_name}
+  friendly_name: ${friendly_name}
   min_version: 2025.9.0
   name_add_mac_suffix: false
 
@@ -24,7 +28,6 @@ api:
 
 ota:
   - platform: esphome
-    password: !secret ota_password
 
 logger:
 
@@ -34,6 +37,44 @@ wifi:
   fast_connect: true
   power_save_mode: none
   reboot_timeout: 10min
+
+# --- I²C (Touch) ---
+i2c:
+  - id: touch_i2c
+    sda: GPIO47
+    scl: GPIO48
+    scan: true
+    frequency: 400kHz
+
+# ---------- QSPI ----------
+spi:
+  - id: qspi_bus
+    type: quad
+    interface: spi3
+    clk_pin: GPIO10
+    data_pins: [GPIO11, GPIO12, GPIO13, GPIO14]
+
+# ---------- Display ----------
+display:
+  - platform: mipi_spi
+    model: CO5300
+    id: my_display
+    bus_mode: quad
+    cs_pin: GPIO9
+    reset_pin: GPIO21
+    brightness: 248
+    #transform:
+    #  swap_xy: true
+    #  mirror_x: true
+    #  mirror_y: true
+    dimensions:
+      height: 466
+      width: 466
+      offset_width: 6
+      offset_height: 0
+    data_rate: 80000000
+    spi_mode: MODE0
+    invert_colors: false
 
 globals:
   - id: ui_built
@@ -77,22 +118,6 @@ image:
   - file: images/bambuicon.png  # neutraler Platzhalter (z.B. schwarz/transparent)
     id: img_placeholder
     type: RGB565
-# ---------- QSPI ----------
-spi:
-  - id: qspi_bus
-    type: quad
-    interface: spi3
-    clk_pin: GPIO10
-    data_pins: [GPIO11, GPIO12, GPIO13, GPIO14]
-
-# --- I²C (Touch) ---
-i2c:
-  - id: touch_i2c
-    sda: GPIO47
-    scl: GPIO48
-    scan: true
-    frequency: 400kHz
-
 touchscreen:
   - platform: ft63x6
     id: touch
@@ -101,29 +126,8 @@ touchscreen:
     update_interval: 30ms
     transform:
       swap_xy: false
-      mirror_x: true
-      mirror_y: true
-
-# ---------- Display ----------
-display:
-  - platform: mipi_spi
-    model: CO5300
-    id: my_display
-    bus_mode: quad
-    cs_pin: GPIO9
-    reset_pin: GPIO21
-    brightness: 248
-    #transform:
-    #  swap_xy: true
-    #  mirror_x: true
-    #  mirror_y: true
-    dimensions:
-      height: 466
-      width: 466
-    data_rate: 80000000
-    spi_mode: MODE0
-    rotation: 180 # 270 when transform (90° rotation towards USB port)
-    invert_colors: false
+      mirror_x: false
+      mirror_y: false
 
 # ---------- HA-Entities ----------
 sensor:
@@ -155,7 +159,7 @@ sensor:
 online_image:
   - id: ha_preview
     # Start-URL ist egal – wir überschreiben sie gleich via set_url
-    url: "${homeassistant_url}/api/image_proxy/image.${bambulab_printer}_titelbild"
+    url: "${homeassistant_url}/api/image_proxy/image.${bambulab_printer}_pick_image"
     format: PNG
     type: RGB565
     resize: 420x420
@@ -173,8 +177,10 @@ online_image:
             using namespace esphome::lvgl;
             // Scroll/Touch sicher aus
             lv_obj_set_scrollbar_mode(id(img_mask), LV_SCROLLBAR_MODE_OFF);
-            lv_obj_clear_flag(id(img_mask), LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_clear_flag(id(img_preview), LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_remove_flag(id(img_mask), LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_remove_flag(id(img_mask), LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_remove_flag(id(img_preview), LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_remove_flag(id(img_preview), LV_OBJ_FLAG_CLICKABLE);
             // Optional: Hinweis ausblenden, sobald ein Bild da ist
             lv_obj_add_flag(id(page2_note), LV_OBJ_FLAG_HIDDEN);
             // Zoom zurücksetzen, dann Größe lesen
@@ -205,7 +211,7 @@ text_sensor:
     internal: true
   - platform: homeassistant
     id: ha_img_url
-    entity_id: image.${bambulab_printer}_titelbild
+    entity_id: image.${bambulab_printer}_pick_image
     attribute: entity_picture
     internal: true
     on_value:
@@ -217,7 +223,7 @@ text_sensor:
               u = std::string("${homeassistant_url}") + u;
             return u;
           update: true
-                    
+
 binary_sensor:
   - platform: homeassistant
     id: hms_errors
@@ -225,7 +231,7 @@ binary_sensor:
     internal: true
   - platform: homeassistant
     id: druckfehler
-    entity_id: binary_sensor.${bambulab_printer}_druckfehler
+    entity_id: binary_sensor.${bambulab_printer}_print_error
     internal: true
 
 
@@ -237,21 +243,21 @@ lvgl:
   widgets:
     - image:
         id: img_preview
-        src: ha_preview  
+        src: ha_preview
         antialias: true
         radius: 12
     - image:
         id: img_logo_small
         src: img_bambu_logo
         antialias: true
-        radius: 8   
+        radius: 8
     - obj:
         id: img_mask
         width: 420         # passend zu online_image.resize
         height: 420
         radius: 210        # Kreis
         bg_opa: 0
-        border_opa: 0     
+        border_opa: 0
     - obj:
         id: backdrop
         width: 466
@@ -293,7 +299,7 @@ lvgl:
     - label: { id: lbl_bed_icon,    text: "\U000F185B", text_color: 0xFFFFFF, text_font: font_mdi_40 }
     - label: { id: lbl_nozzle, text: " --°C", text_color: 0xFFFFFF, text_font: font_dosis_32 }
     - label: { id: lbl_bed,    text: " --°C", text_color: 0xFFFFFF, text_font: font_dosis_32 }
-    - label: { id: page2_note, text: "Preview deaktiviert", align: center, text_color: 0x888888, text_font: font_dosis_20 }
+    - label: { id: page2_note, text: "Preview disabled", align: center, text_color: 0x888888, text_font: font_dosis_20 }
     - obj:
         id: row_remaining
         bg_opa: 0
@@ -374,7 +380,7 @@ interval:
           lv_obj_set_style_bg_opa(page1, LV_OPA_TRANSP, LV_PART_MAIN);
           lv_obj_set_style_border_opa(page1, LV_OPA_TRANSP, LV_PART_MAIN);
           lv_obj_set_pos(page1, 0, 0);
-          
+
           // page2
           lv_obj_t* page2 = lv_obj_create(pager);
           lv_obj_set_size(page2, W, H);
@@ -387,11 +393,11 @@ interval:
           lv_obj_align(id(lbl_status), LV_ALIGN_CENTER, 0, -86);
 
           lv_obj_set_parent(id(lbl_layer), page1);
-          lv_obj_align(id(lbl_layer), LV_ALIGN_CENTER, 0, 70);  
+          lv_obj_align(id(lbl_layer), LV_ALIGN_CENTER, 0, 70);
 
           lv_obj_set_parent(id(row_remaining), page1);
           lv_obj_set_width(id(row_remaining), 280);                   // fix: keine dynamische Breite
-          lv_obj_clear_flag(id(row_remaining), LV_OBJ_FLAG_SCROLLABLE);
+          lv_obj_remove_flag(id(row_remaining), LV_OBJ_FLAG_SCROLLABLE);
           lv_obj_align(id(row_remaining), LV_ALIGN_CENTER, 0, 170);
           lv_obj_move_foreground(id(row_remaining));
 
@@ -404,20 +410,21 @@ interval:
           lv_obj_align(id(img_logo_small), LV_ALIGN_CENTER, 0, -7);
           // Sicherheit: nie über den Text legen
           lv_obj_move_background(id(img_logo_small));
-          lv_obj_clear_flag(id(img_logo_small), LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);     
+          lv_obj_remove_flag(id(img_logo_small), LV_OBJ_FLAG_CLICKABLE);
+          lv_obj_remove_flag(id(img_logo_small), LV_OBJ_FLAG_SCROLLABLE);
 
           // === Nozzle & Bed NUR auf Page 1 ===
           lv_obj_set_parent(id(lbl_nozzle_icon), page1);
           lv_obj_set_parent(id(lbl_nozzle),      page1);
           lv_obj_set_parent(id(lbl_bed_icon),    page1);
           lv_obj_set_parent(id(lbl_bed),         page1);
-          
+
           // Positionen wie gehabt (relativ zum Page-1-Zentrum)
           const int NOZZLE_ICON_X = -182, NOZZLE_ICON_Y = -10;
           const int NOZZLE_TEXT_X = -132, NOZZLE_TEXT_Y = -10;
           const int BED_ICON_X    =  110, BED_ICON_Y    = -10;
           const int BED_TEXT_X    =  160, BED_TEXT_Y    = -10;
-          
+
           lv_obj_align(id(lbl_nozzle_icon), LV_ALIGN_CENTER, NOZZLE_ICON_X, NOZZLE_ICON_Y);
           lv_obj_align(id(lbl_nozzle),      LV_ALIGN_CENTER, NOZZLE_TEXT_X, NOZZLE_TEXT_Y);
           lv_obj_align(id(lbl_bed_icon),    LV_ALIGN_CENTER, BED_ICON_X, BED_ICON_Y);
@@ -428,8 +435,9 @@ interval:
           lv_obj_center(id(arc_main));
           lv_obj_move_foreground(id(arc_main));
           // sicherstellen, dass er keine Touches blockt
-          lv_obj_clear_flag(id(arc_main), LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-          
+          lv_obj_remove_flag(id(arc_main), LV_OBJ_FLAG_CLICKABLE);
+          lv_obj_remove_flag(id(arc_main), LV_OBJ_FLAG_SCROLLABLE);
+
           // %-Label (auch oben, damit es nie verdeckt wird)
           const int RING_SIZE = 466;
           const int PCT_MARGIN_FROM_TOP = 46;
@@ -445,70 +453,72 @@ interval:
           lv_obj_set_parent(id(page2_note), page2);
           lv_obj_align(id(page2_note), LV_ALIGN_CENTER, 0, 0);
           lv_obj_set_style_text_color(id(page2_note), lv_color_hex(0x888888), LV_PART_MAIN);
-          
+
           // runde Maske als Parent
           lv_obj_set_parent(id(img_mask), page2);
           lv_obj_align(id(img_mask), LV_ALIGN_CENTER, 0, 0);
           lv_obj_set_style_clip_corner(id(img_mask), true, LV_PART_MAIN);
           lv_obj_set_scrollbar_mode(id(img_mask), LV_SCROLLBAR_MODE_OFF);
-          lv_obj_clear_flag(id(img_mask), LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-          
+          lv_obj_remove_flag(id(img_mask), LV_OBJ_FLAG_SCROLLABLE);
+          lv_obj_remove_flag(id(img_mask), LV_OBJ_FLAG_CLICKABLE);
+
           // Bild in die Maske
           lv_obj_set_parent(id(img_preview), id(img_mask));
           lv_obj_center(id(img_preview));
-          lv_obj_clear_flag(id(img_preview), LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-          
+          lv_obj_remove_flag(id(img_preview), LV_OBJ_FLAG_SCROLLABLE);
+          lv_obj_remove_flag(id(img_preview), LV_OBJ_FLAG_CLICKABLE);
+
           // Auf Seite 1 starten
           lv_obj_scroll_to_view(page1, LV_ANIM_OFF);
-          
+
           // === Smooth scrolling: throttle heavy redraws during pager scroll ===
           lv_obj_add_event_cb(pager, [](lv_event_t* e){
             using namespace esphome::lvgl;
             const int W = 466;
-          
+
             static bool p1_shown  = true;   // gemerkter Sichtbarkeitszustand
             static bool init_done = false;
-          
+
             auto set_page1_visible = [&](bool visible){
               if (p1_shown == visible) return;  // Hysterese: nur toggeln, wenn nötig
               for (auto o : { id(lbl_status), id(lbl_layer), id(row_remaining),
                               id(lbl_nozzle_icon), id(lbl_nozzle),
                               id(lbl_bed_icon),    id(lbl_bed),
                               id(img_logo_small) }) {
-                if (visible) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+                if (visible) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
                 else         lv_obj_add_flag(o,   LV_OBJ_FLAG_HIDDEN);
               }
               p1_shown = visible;
             };
-          
+
             lv_event_code_t code = lv_event_get_code(e);
-          
+
             if (code == LV_EVENT_SCROLL_BEGIN) {
               id(is_scrolling) = true;  // dein bestehendes Throttling nutzt das Flag
             }
-          
+
             if (code == LV_EVENT_SCROLL || code == LV_EVENT_SCROLL_BEGIN) {
               // Wie weit wurde horizontal gerollt? 0 ~ Page1 zentriert, ~W ~ Page2 zentriert
-              int sx = lv_obj_get_scroll_x(lv_event_get_target(e));
-          
+              int sx = lv_obj_get_scroll_x((lv_obj_t *)lv_event_get_target(e));
+
               // Hysterese-Schwellen: stabil gegen Hin-und-Her um die Mitte
               const int THRESH_HIDE = (int)(W * 0.60f);  // >60% Richtung Page2 ⇒ Page1-Widgets aus
               const int THRESH_SHOW = (int)(W * 0.40f);  // <40% zurück ⇒ Page1-Widgets an
-          
+
               if (sx > THRESH_HIDE)       set_page1_visible(false);
               else if (sx < THRESH_SHOW)  set_page1_visible(true);
-          
+
               if (!init_done) {           // einmalige Initialisierung (Start auf Page1)
                 set_page1_visible(true);
                 init_done = true;
               }
             }
-          
+
             if (code == LV_EVENT_SCROLL_END || code == LV_EVENT_RELEASED) {
               id(is_scrolling) = false;
-          
+
               // Nach Snap final „einrasten“: Page1 sichtbar, wenn deren Anteil dominiert
-              int sx = lv_obj_get_scroll_x(lv_event_get_target(e));
+              int sx = lv_obj_get_scroll_x((lv_obj_t *)lv_event_get_target(e));
               set_page1_visible(sx < (W/2));
             }
           }, LV_EVENT_ALL, nullptr);
@@ -517,7 +527,7 @@ interval:
                             id(lbl_nozzle_icon), id(lbl_nozzle),
                             id(lbl_bed_icon),    id(lbl_bed),
                             id(img_logo_small) }) {
-              lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+              lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
             }
           }
 
@@ -652,23 +662,23 @@ interval:
     then:
       - lambda: |-
           auto lower = [](std::string s){ for(auto &c:s) c=(char)tolower((unsigned char)c); return s; };
-      
+
           // Progress lesen + puffern
           int p = id(print_progress).has_state() ? (int) id(print_progress).state : id(last_prog);
           if (p < 0) p = 0;
           if (p > 100) p = 100;
           if (id(print_progress).has_state()) id(last_prog) = p;  // nur bei echtem Update überschreiben
-      
+
           // Status & Stage
           std::string ps = id(print_status).has_state() ? lower(id(print_status).state) : "";
           std::string st = id(current_stage).has_state() ? lower(id(current_stage).state) : "";
-      
+
           // DONE strikt
           bool done_strict = ((ps == "finish" || ps == "finished" || ps.find("finish") != std::string::npos)
                               && (st.find("idle") != std::string::npos)
                               && (p == 100));
           bool failed   = ps == "failed" || ps.find("fail") != std::string::npos;
-      
+
           // Aktiv-Logik (an Wahrheitstabelle angepasst):
           // - aktiv, sobald Fortschritt (1..99) oder Status "running/prepare/printing"
           // - deaktiv, wenn done_strict oder failed
@@ -791,14 +801,14 @@ interval:
           std::string ps    = id(print_status).has_state()  ? lower(id(print_status).state)  : "";
           int prog = id(print_progress).has_state() ? (int)id(print_progress).state : 0;
           if (prog < 0) prog = 0; if (prog > 100) prog = 100;
-          
+
           // Filament = gelb
           if (stage.find("filament_loading") != std::string::npos
            || stage.find("filament_unloading") != std::string::npos) {
             lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0xFFD54F), LV_PART_MAIN);
             return;
           }
-          
+
           // Fehler = rot (außer Filament)
           bool ps_failed = (ps == "failed") || (ps.find("fail") != std::string::npos);
           bool err_print = id(druckfehler).has_state() && id(druckfehler).state;
@@ -807,7 +817,7 @@ interval:
             lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0xFF3333), LV_PART_MAIN);
             return;
           }
-          
+
           // DONE strikt = blau
           bool done_strict = ((ps == "finish" || ps == "finished" || ps.find("finish") != std::string::npos)
                               && (stage.find("idle") != std::string::npos)
@@ -816,7 +826,7 @@ interval:
             lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0x00BFFF), LV_PART_MAIN);
             return;
           }
-          
+
           // idle/offline aber nicht fertig
           bool idleish = stage.find("idle") != std::string::npos || stage.find("offline") != std::string::npos;
           if (idleish) {
@@ -829,7 +839,7 @@ interval:
             }
             return;
           }
-          
+
           // restliche Stages
           if (stage.find("heatbed_preheating") != std::string::npos
            || stage.find("nozzle_preheating")  != std::string::npos
@@ -881,7 +891,7 @@ interval:
           }
           lv_obj_align(id(row_remaining), LV_ALIGN_CENTER, 0, 170);
 
-          
+
 
       - lvgl.label.update:
           id: lbl_layer

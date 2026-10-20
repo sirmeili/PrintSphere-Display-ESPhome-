@@ -1,0 +1,11 @@
+# Copy to printsphere-<something>.yaml (gitignored), fill in your values, and flash that file.
+# Substitutions here override the defaults in esphome-project.yaml.
+# Credentials (api_encrypt, wifi_ssid, wifi_password) come from secrets.yaml.
+substitutions:
+  device_name: printsphere
+  friendly_name: PrintSphere-Display
+  homeassistant_url: http://homeassistant.local:8123
+  bambulab_printer: your_printer_id   # printer slug from HA, e.g. p1s_01p00a000000000
+
+packages:
+  printsphere: !include esphome-project.yaml
