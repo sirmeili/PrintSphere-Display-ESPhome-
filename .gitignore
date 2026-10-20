@@ -1,0 +1,6 @@
+# Personal device configs (see example-device.yaml)
+printsphere-*.yaml
+
+# ESPHome
+secrets.yaml
+.esphome/
